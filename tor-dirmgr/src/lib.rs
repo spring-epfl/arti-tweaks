@@ -43,7 +43,9 @@ use crate::shared_ref::SharedMutArc;
 use crate::storage::sqlite::SqliteStore;
 use retry::RetryConfig;
 use tor_circmgr::CircMgr;
+use tor_llcrypto::pk::rsa::RsaIdentity;
 use tor_netdir::NetDir;
+use tor_netdoc::doc::authcert::AuthCertKeyIds;
 use tor_netdoc::doc::netstatus::ConsensusFlavor;
 
 use anyhow::{Context, Result};
@@ -64,6 +66,36 @@ pub use config::{
 pub use docid::DocId;
 pub use err::Error;
 pub use storage::DocumentText;
+
+///
+pub struct StaticCert<'a> {
+    ///
+    id_fingerprint: [u8; 20],
+
+    ///
+    sk_fingerprint: [u8; 20],
+
+    ///
+    contents: &'a str,
+}
+
+///
+pub struct StaticMicrodescriptor<'a> {
+    ///
+    digest: [u8; 32],
+
+    ///
+    contents: &'a str,
+}
+
+///
+static OUR_CONSENSUS: &str = include_str!("../../consensus.in");
+
+///
+static OUR_CERTIFICATES: [StaticCert; 9] = include!("../../certificates.in");
+
+///
+static OUR_MICRODESCRIPTORS: [StaticMicrodescriptor; 5433] = include!("../../microdescriptors.in");
 
 /// A directory manager to download, fetch, and cache a Tor directory.
 ///
@@ -422,12 +454,12 @@ impl<R: Runtime> DirMgr<R> {
         result: &mut HashMap<DocId, DocumentText>,
     ) -> Result<()> {
         use DocQuery::*;
-        let store = self.store.lock().await;
         match query {
             LatestConsensus {
                 flavor,
                 cache_usage,
             } => {
+                /*
                 if *cache_usage == CacheUsage::MustDownload {
                     // Do nothing: we don't want a cached consensus.
                 } else if let Some(c) =
@@ -439,27 +471,57 @@ impl<R: Runtime> DirMgr<R> {
                     };
                     result.insert(id, c.into());
                 }
+                */
+                let id = DocId::LatestConsensus {
+                    flavor: *flavor,
+                    cache_usage: *cache_usage,
+                };
+                let consensus = DocumentText::from_string(OUR_CONSENSUS.to_string());
+                result.insert(id, consensus);
             }
-            AuthCert(ids) => result.extend(
-                store
-                    .authcerts(&ids)?
-                    .into_iter()
-                    .map(|(id, c)| (DocId::AuthCert(id), DocumentText::from_string(c))),
-            ),
+            AuthCert(ids) => {
+                /*
+                result.extend(
+                    store
+                        .authcerts(&ids)?
+                        .into_iter()
+                        .map(|(id, c)| (DocId::AuthCert(id), DocumentText::from_string(c))
+                    ),
+                );
+                */
+                result.extend(
+                    OUR_CERTIFICATES.iter().map(
+                        |StaticCert{id_fingerprint, sk_fingerprint, contents}|
+                        (
+                            DocId::AuthCert(
+                                AuthCertKeyIds{
+                                    id_fingerprint: RsaIdentity::from(*id_fingerprint),
+                                    sk_fingerprint: RsaIdentity::from(*sk_fingerprint)
+                                }
+                            ),
+                            DocumentText::from_string(contents.to_string())
+                        )
+                    )
+                );
+            }
             Microdesc(digests) => {
+                /*
                 result.extend(
                     store
                         .microdescs(digests)?
                         .into_iter()
-                        .map(|(id, md)| (DocId::Microdesc(id), DocumentText::from_string(md))),
+                        .map(|(id, md)| (DocId::Microdesc(id), DocumentText::from_string(md))
+                    )
+                );
+                */
+                result.extend(
+                    OUR_MICRODESCRIPTORS.iter().map(
+                        |StaticMicrodescriptor{digest, contents}|
+                        (DocId::Microdesc(*digest), DocumentText::from_string(contents.to_string()))
+                    )
                 );
             }
-            RouterDesc(digests) => result.extend(
-                store
-                    .routerdescs(digests)?
-                    .into_iter()
-                    .map(|(id, rd)| (DocId::RouterDesc(id), DocumentText::from_string(rd))),
-            ),
+            RouterDesc(_) => {}
         }
         Ok(())
     }
@@ -473,18 +535,10 @@ impl<R: Runtime> DirMgr<R> {
         let mut res = Vec::new();
         for q in q.split_for_download() {
             match q {
-                DocQuery::LatestConsensus { flavor, .. } => {
-                    res.push(self.make_consensus_request(flavor).await?);
-                }
-                DocQuery::AuthCert(ids) => {
-                    res.push(ClientRequest::AuthCert(ids.into_iter().collect()));
-                }
-                DocQuery::Microdesc(ids) => {
-                    res.push(ClientRequest::Microdescs(ids.into_iter().collect()));
-                }
-                DocQuery::RouterDesc(ids) => {
-                    res.push(ClientRequest::RouterDescs(ids.into_iter().collect()));
-                }
+                DocQuery::LatestConsensus { .. } => {}
+                DocQuery::AuthCert(_) => {}
+                DocQuery::Microdesc(_) => {}
+                DocQuery::RouterDesc(_) => {}
             }
         }
         Ok(res)
