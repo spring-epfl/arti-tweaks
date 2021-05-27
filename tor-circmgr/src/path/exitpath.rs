@@ -35,16 +35,12 @@ impl ExitPathBuilder {
             .pick_relay(rng, WeightRole::Exit, |r| self.ports_supported_by(r))
             .ok_or_else(|| Error::NoRelays("No exit relay found".into()))?;
 
-        let middle = netdir
-            .pick_relay(rng, WeightRole::Middle, |r| !r.in_same_family(&exit))
-            .ok_or_else(|| Error::NoRelays("No middle relay found".into()))?;
-
         let entry = netdir
             .pick_relay(rng, WeightRole::Guard, |r| {
-                !r.in_same_family(&middle) && !r.in_same_family(&exit)
+                !r.in_same_family(&exit)
             })
             .ok_or_else(|| Error::NoRelays("No entry relay found".into()))?;
 
-        Ok(TorPath::Path(vec![entry, middle, exit]))
+        Ok(TorPath::Path(vec![entry, exit]))
     }
 }
