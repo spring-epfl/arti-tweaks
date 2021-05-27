@@ -200,30 +200,6 @@ impl<R: Runtime> DirMgr<R> {
             .await
             .context("Error loading cached directory")?;
 
-        let (mut sender, receiver) = if have_directory {
-            info!("Loaded a good directory from cache.");
-            (None, None)
-        } else {
-            info!("Didn't get usable directory from cache.");
-            let (sender, receiver) = oneshot::channel();
-            (Some(sender), Some(receiver))
-        };
-
-        // Whether we loaded or not, we now start downloading.
-        let dirmgr_weak = Arc::downgrade(&dirmgr);
-        runtime.spawn(async move {
-            // TODO: don't warn when these are Error::ManagerDropped.
-            if let Err(e) = Self::reload_until_owner(&dirmgr_weak, &mut sender).await {
-                warn!("Unrecoverd error while waiting for bootstrap: {}", e);
-            } else if let Err(e) = Self::download_forever(dirmgr_weak, sender).await {
-                warn!("Unrecovered error while downloading: {}", e);
-            }
-        })?;
-
-        if let Some(receiver) = receiver {
-            let _ = receiver.await;
-        }
-
         info!("We have enough information to build circuits.");
 
         Ok(dirmgr)
