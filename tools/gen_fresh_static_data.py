@@ -74,10 +74,11 @@ def fetch_consensus() -> NetworkStatusDocumentV3:
     """
     downloader = DescriptorDownloader()
 
-    # Somehow the validation done by Stem fails...
+    # TODO: Somehow the validation done by Stem fails...
     consensus = downloader.get_consensus(
         document_handler=DocumentHandler.DOCUMENT,
-        microdescriptor=True
+        microdescriptor=True,
+        #validate=True
     ).run()[0]
 
     if not isinstance(consensus, NetworkStatusDocumentV3):
@@ -93,11 +94,11 @@ def fetch_microdescriptors(routers: List[RouterStatusEntryMicroV3]) -> List[Micr
     downloader = DescriptorDownloader()
     microdescriptors = list()
     buckets = [
-        iter(b64encode(bytes.fromhex(r.fingerprint)).decode("ASCII") for r in routers)
+        iter(r.microdescriptor_digest for r in routers)
     ] * MAX_MICRODESCRIPTOR_HASHES
     for bucket in zip_longest(*buckets):
-        print(bucket)
-        microdescriptors += downloader.get_microdescriptors(hashes=bucket, validate=True).run()
+        hashes = [h for h in bucket if h is not None]
+        microdescriptors += downloader.get_microdescriptors(hashes=hashes, validate=True).run()
 
     for microdescriptor in microdescriptors:
         if not isinstance(microdescriptor, Microdescriptor):
@@ -191,15 +192,16 @@ def generate_consensus_dummy_signature(routers: List[RouterStatusEntryMicroV3]) 
 
 def generate_microdescriptors_rust(microdescriptors: List[Microdescriptor]) -> bytes:
     """
+    Generate Rust code for static microdescriptors data.
     """
     code = list()
 
     for microdescriptor in microdescriptors:
-        microdescriptor_raw = microdescriptor.get_bytes().encode("ASCII")
+        microdescriptor_raw = microdescriptor.get_bytes()
         hexdigest = sha256(microdescriptor_raw).hexdigest()
-        esacped_digest = "".join(r"\x" + hexdigest[i:i + 2] for i in range(0, len(hexdigest), 2))
+        escaped_digest = "".join(r"\x" + hexdigest[i:i + 2] for i in range(0, len(hexdigest), 2))
 
-        code.append(f"StaticMicrodescriptor{{\ndigest: *b\"{esacped_digest}\",\ncontents: \"{microdescriptor}\"}}")
+        code.append(f"StaticMicrodescriptor{{\ndigest: *b\"{escaped_digest}\",\ncontents: \"{microdescriptor}\"}}")
 
     return "[" + ",\n".join(code) + "]"
 
@@ -213,15 +215,14 @@ def main() -> None:
 
     consensus = generate_consensus_dummy_signature(routers)
 
-    # Fails with Stem 1.7.x
-    #microdescriptors = fetch_microdescriptors(routers)
-    #microdescriptors_code = generate_microdescriptors_rust(microdescriptors)
+    microdescriptors = fetch_microdescriptors(routers)
+    microdescriptors_code = generate_microdescriptors_rust(microdescriptors)
 
     with PATH_CONSENSUS_OUT.open("wb") as consensus_fd:
         consensus_fd.write(consensus)
 
-    #with PATH_MICRODESCRIPTORS_OUT.open("wb") as microdescriptors_fd:
-    #    microdescriptors_fd.write(microdescriptors_code)
+    with PATH_MICRODESCRIPTORS_OUT.open("w") as microdescriptors_fd:
+        microdescriptors_fd.write(microdescriptors_code)
 
 
 if __name__ == "__main__":
