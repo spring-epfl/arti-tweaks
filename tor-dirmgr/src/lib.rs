@@ -67,36 +67,6 @@ pub use docid::DocId;
 pub use err::Error;
 pub use storage::DocumentText;
 
-///
-pub struct StaticCert<'a> {
-    ///
-    id_fingerprint: [u8; 20],
-
-    ///
-    sk_fingerprint: [u8; 20],
-
-    ///
-    contents: &'a str,
-}
-
-///
-pub struct StaticMicrodescriptor<'a> {
-    ///
-    digest: [u8; 32],
-
-    ///
-    contents: &'a str,
-}
-
-///
-static OUR_CONSENSUS: &str = include_str!("../../consensus.in");
-
-///
-static OUR_CERTIFICATES: [StaticCert; 9] = include!("../../certificates.in");
-
-///
-static OUR_MICRODESCRIPTORS: [StaticMicrodescriptor; 5433] = include!("../../microdescriptors.in");
-
 /// A directory manager to download, fetch, and cache a Tor directory.
 ///
 /// A DirMgr can operate in three modes:
@@ -127,7 +97,8 @@ pub struct DirMgr<R: Runtime> {
     // a rule that we never hold the guard for this mutex across an async
     // suspend point.  But that will be hard to enforce until the
     // `must_not_suspend` lint is in stable.
-    store: Mutex<SqliteStore>,
+    //store: Mutex<SqliteStore>,
+
     /// Our latest sufficiently bootstrapped directory, if we have one.
     ///
     /// We use the RwLock so that we can give this out to a bunch of other
@@ -151,11 +122,11 @@ impl<R: Runtime> DirMgr<R> {
     /// In general, you shouldn't use this function in a long-running
     /// program; it's only suitable for command-line or batch tools.
     // TODO: I wish this function didn't have to be async or take a runtime.
-    pub async fn load_once(runtime: R, config: DirMgrConfig) -> Result<Arc<NetDir>> {
+    pub async fn load_once(runtime: R, config: DirMgrConfig, docdir: &str) -> Result<Arc<NetDir>> {
         let dirmgr = Arc::new(Self::from_config(config, runtime, None)?);
 
         // TODO: add some way to return a directory that isn't up-to-date
-        let _success = dirmgr.load_directory().await?;
+        let _success = dirmgr.load_directory(docdir).await?;
 
         dirmgr
             .opt_netdir()
@@ -173,10 +144,11 @@ impl<R: Runtime> DirMgr<R> {
     /// program; it's only suitable for command-line or batch tools.
     pub async fn load_or_bootstrap_once(
         config: DirMgrConfig,
+        docdir: &str,
         runtime: R,
         circmgr: Arc<CircMgr<R>>,
     ) -> Result<Arc<NetDir>> {
-        let dirmgr = DirMgr::bootstrap_from_config(config, runtime, circmgr).await?;
+        let dirmgr = DirMgr::bootstrap_from_config(config, docdir, runtime, circmgr).await?;
         Ok(dirmgr.netdir())
     }
 
@@ -189,14 +161,15 @@ impl<R: Runtime> DirMgr<R> {
     /// replaces the directory when a new one is available.
     pub async fn bootstrap_from_config(
         config: DirMgrConfig,
+        docdir: &str,
         runtime: R,
         circmgr: Arc<CircMgr<R>>,
     ) -> Result<Arc<Self>> {
         let dirmgr = Arc::new(DirMgr::from_config(config, runtime.clone(), Some(circmgr))?);
 
         // Try to load from the cache.
-        let have_directory = dirmgr
-            .load_directory()
+        dirmgr
+            .load_directory(docdir)
             .await
             .context("Error loading cached directory")?;
 
@@ -205,6 +178,7 @@ impl<R: Runtime> DirMgr<R> {
         Ok(dirmgr)
     }
 
+    /*
     /// Try forever to either lock the storage (and thereby become the
     /// owner), or to reload the database.
     ///
@@ -259,7 +233,9 @@ impl<R: Runtime> DirMgr<R> {
             }
         }
     }
+    */
 
+    /*
     /// Try to fetch our directory info and keep it updated, indefinitely.
     ///
     /// If we have begin to have a bootstrapped directory, send a
@@ -328,6 +304,7 @@ impl<R: Runtime> DirMgr<R> {
             state = state.reset()?;
         }
     }
+    */
 
     /// Get a reference to the circuit manager, if we have one.
     fn circmgr(&self) -> Result<Arc<CircMgr<R>>> {
@@ -337,6 +314,7 @@ impl<R: Runtime> DirMgr<R> {
             .ok_or_else(|| Error::NoDownloadSupport.into())
     }
 
+    /*
     /// Try to make this a directory manager with read-write access to its
     /// storage.
     ///
@@ -346,6 +324,7 @@ impl<R: Runtime> DirMgr<R> {
     async fn try_upgrade_to_readwrite(&self) -> Result<bool> {
         self.store.lock().await.upgrade_to_readwrite()
     }
+    */
 
     /// Construct a DirMgr from a DirMgrConfig.
     fn from_config(
@@ -354,11 +333,11 @@ impl<R: Runtime> DirMgr<R> {
         circmgr: Option<Arc<CircMgr<R>>>,
     ) -> Result<Self> {
         let readonly = circmgr.is_none();
-        let store = Mutex::new(config.open_sqlite_store(readonly)?);
+        //let store = Mutex::new(config.open_sqlite_store(readonly)?);
         let netdir = SharedMutArc::new();
         Ok(DirMgr {
             config,
-            store,
+            //store,
             netdir,
             circmgr,
             runtime,
@@ -369,11 +348,11 @@ impl<R: Runtime> DirMgr<R> {
     /// cache, if it is newer than the one we have.
     ///
     /// Return false if there is no such consensus.
-    async fn load_directory(self: &Arc<Self>) -> Result<bool> {
+    async fn load_directory(self: &Arc<Self>, docdir: &str) -> Result<bool> {
         //let store = &self.store;
 
         let state = state::GetConsensusState::new(Arc::downgrade(self), CacheUsage::CacheOnly)?;
-        let _ = bootstrap::load(Arc::clone(self), Box::new(state)).await?;
+        let _ = bootstrap::load(Arc::clone(self), Box::new(state), docdir).await?;
 
         Ok(self.netdir.get().is_some())
     }
@@ -393,6 +372,7 @@ impl<R: Runtime> DirMgr<R> {
         self.opt_netdir().expect("DirMgr was not bootstrapped!")
     }
 
+    /*
     /// Try to load the text of a signle document described by `doc` from
     /// storage.
     pub async fn text(&self, doc: &DocId) -> Result<Option<DocumentText>> {
@@ -422,7 +402,9 @@ impl<R: Runtime> DirMgr<R> {
         }
         Ok(result)
     }
+    */
 
+    /*
     /// Load all the documents for a single DocumentQuery from the store.
     async fn load_documents_into(
         &self,
@@ -501,7 +483,9 @@ impl<R: Runtime> DirMgr<R> {
         }
         Ok(())
     }
+    */
 
+    /*
     /// Convert a DocQuery into a set of ClientRequests, suitable for sending
     /// to a directory cache.
     ///
@@ -519,7 +503,9 @@ impl<R: Runtime> DirMgr<R> {
         }
         Ok(res)
     }
+    */
 
+    /*
     /// Construct an appropriate ClientRequest to download a consensus
     /// of the given flavor.
     async fn make_consensus_request(&self, flavor: ConsensusFlavor) -> Result<ClientRequest> {
@@ -539,7 +525,9 @@ impl<R: Runtime> DirMgr<R> {
 
         Ok(ClientRequest::Consensus(request))
     }
+    */
 
+    /*
     /// Given a request we sent and the response we got from a
     /// directory server, see whether we should expand that response
     /// into "something larger".
@@ -571,6 +559,7 @@ impl<R: Runtime> DirMgr<R> {
         }
         Ok(text)
     }
+    */
 }
 
 /// A degree of readiness for a given directory state object.
@@ -616,7 +605,7 @@ trait DirState: Send {
     fn can_advance(&self) -> bool;
     /// Add one or more documents from our cache; returns 'true' if there
     /// was any change in this state.
-    fn add_from_cache(&mut self, docs: HashMap<DocId, DocumentText>) -> Result<bool>;
+    fn add_from_cache(&mut self, docdir: &str) -> Result<bool>;
 
     /// Add information that we have just downloaded to this state; returns
     /// 'true' if there as any change in this state.

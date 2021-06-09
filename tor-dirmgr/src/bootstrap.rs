@@ -19,6 +19,7 @@ use log::{info, warn};
 use tor_dirclient::DirResponse;
 use tor_rtcompat::{Runtime, SleepProviderExt};
 
+/*
 /// Try to read a set of documents from `dirmgr` by ID.
 async fn load_all<R: Runtime>(
     dirmgr: &DirMgr<R>,
@@ -30,7 +31,9 @@ async fn load_all<R: Runtime>(
     }
     Ok(loaded)
 }
+*/
 
+/*
 /// Launch a single client request and get an associated response.
 async fn fetch_single<R: Runtime>(
     dirmgr: Arc<DirMgr<R>>,
@@ -48,7 +51,9 @@ async fn fetch_single<R: Runtime>(
 
     Ok((request, resource))
 }
+*/
 
+/*
 /// Launch a set of download requests for a set of missing objects in
 /// `missing`, and return each request along with the response it received.
 ///
@@ -82,19 +87,21 @@ async fn fetch_multiple<R: Runtime>(
 
     Ok(useful_responses)
 }
+*/
 
 /// Try tp update `state` by loading cached information from `dirmgr`.
 /// Return true if anything changed.
 async fn load_once<R: Runtime>(
     dirmgr: &Arc<DirMgr<R>>,
     state: &mut Box<dyn DirState>,
+    docdir: &str
 ) -> Result<bool> {
     let missing = state.missing_docs();
     if missing.is_empty() {
         Ok(false)
     } else {
-        let documents = load_all(&dirmgr, missing).await?;
-        state.add_from_cache(documents)
+        //let documents = load_all(&dirmgr, missing, docdir).await?;
+        state.add_from_cache(docdir)
     }
 }
 
@@ -105,10 +112,11 @@ async fn load_once<R: Runtime>(
 pub(crate) async fn load<R: Runtime>(
     dirmgr: Arc<DirMgr<R>>,
     mut state: Box<dyn DirState>,
+    docdir: &str
 ) -> Result<Box<dyn DirState>> {
     let mut safety_counter = 0_usize;
     loop {
-        let changed = load_once(&dirmgr, &mut state).await?;
+        let changed = load_once(&dirmgr, &mut state, docdir).await?;
 
         if state.can_advance() {
             state = state.advance()?;
@@ -127,6 +135,7 @@ pub(crate) async fn load<R: Runtime>(
     Ok(state)
 }
 
+/*
 /// Helper: Make a set of download attempts for the current directory state,
 /// and on success feed their results into the state object.
 ///
@@ -164,7 +173,9 @@ async fn download_attempt<R: Runtime>(
 
     Ok(changed)
 }
+*/
 
+/*
 /// Download information into a DirState state machine until it is
 /// ["complete"](Readiness::Complete), or until we hit a
 /// non-recoverable error.
@@ -271,7 +282,9 @@ pub(crate) async fn download<R: Runtime>(
         return Ok((state, Some(Error::CantAdvanceState)));
     }
 }
+*/
 
+/*
 /// Helper: Clamp `v` so that it is no more than one week from `now`.
 ///
 /// If `v` is absent, return the time that's one week from now.
@@ -309,3 +322,5 @@ mod test {
         );
     }
 }
+
+*/

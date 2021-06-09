@@ -10,6 +10,7 @@
 //! [`bootstrap`](crate::bootstrap) module for functions that actually
 //! load or download directory information.
 
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::lock::Mutex;
@@ -17,6 +18,7 @@ use log::{info, warn};
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::fs;
 use std::sync::Weak;
 use std::time::{Duration, SystemTime};
 use tor_netdir::{MdReceiver, NetDir, PartialNetDir};
@@ -45,6 +47,32 @@ use tor_netdoc::{
     AllowAnnotations,
 };
 use tor_rtcompat::Runtime;
+
+
+///
+struct StaticCert<'a> {
+    ///
+    id_fingerprint: [u8; 20],
+
+    ///
+    sk_fingerprint: [u8; 20],
+
+    ///
+    contents: &'a str,
+}
+
+/*
+///
+static OUR_CONSENSUS: &str = include_str!("../../consensus.in");
+*/
+
+///
+static OUR_CERTIFICATES: [StaticCert; 9] = include!("../../certificates.in");
+
+/*
+///
+static OUR_MICRODESCRIPTORS: &str = include_str!("../../microdescriptors.txt");
+*/
 
 /// An object where we can put a usable netdir.
 ///
@@ -152,20 +180,18 @@ impl<DM: WriteNetDir> DirState for GetConsensusState<DM> {
             Err(Error::ManagerDropped.into())
         }
     }
-    fn add_from_cache(&mut self, docs: HashMap<DocId, DocumentText>) -> Result<bool> {
-        let text = match docs.into_iter().next() {
-            None => return Ok(false),
-            Some((
-                DocId::LatestConsensus {
-                    flavor: ConsensusFlavor::Microdesc,
-                    ..
-                },
-                text,
-            )) => text,
-            _ => return Err(Error::Unwanted("Not an md consensus").into()),
-        };
+    fn add_from_cache(&mut self, docdir: &str) -> Result<bool> {
+        /*
+        // static data
+        self.add_consensus_text(true, OUR_CONSENSUS)
+        .map(|meta| meta.is_some())
+        */
 
-        self.add_consensus_text(true, text.as_str()?)
+        // side-loaded data
+        let consensus_path = format!("{}/consensus.txt", docdir);
+        let consensus = fs::read_to_string(consensus_path)
+            .expect("Failed to read the consensus.");
+        self.add_consensus_text(true, consensus.as_str())
             .map(|meta| meta.is_some())
     }
     async fn add_from_download(
@@ -311,20 +337,15 @@ impl<DM: WriteNetDir> DirState for GetCertsState<DM> {
             Err(Error::ManagerDropped.into())
         }
     }
-    fn add_from_cache(&mut self, docs: HashMap<DocId, DocumentText>) -> Result<bool> {
+    fn add_from_cache(&mut self, docdir: &str) -> Result<bool> {
         let mut changed = false;
-        // Here we iterate over the documents we want, taking them from
-        // our input and remembering them.
-        for id in self.missing_docs().iter() {
-            if let Some(cert) = docs.get(id) {
-                let parsed = AuthCert::parse(cert.as_str()?)?.check_signature()?;
-                if let Ok(cert) = parsed.check_valid_now() {
-                    self.missing_certs.remove(cert.key_ids());
-                    self.certs.push(cert);
-                    changed = true;
-                } else {
-                    warn!("Got a cert from our cache that we couldn't parse");
-                }
+        // static data for certificates
+        for static_cert in OUR_CERTIFICATES.iter() {
+            let parsed = AuthCert::parse(static_cert.contents)?.check_signature()?;
+            if let Ok(cert) = parsed.check_valid_now() {
+                self.missing_certs.remove(cert.key_ids());
+                self.certs.push(cert);
+                changed = true;
             }
         }
         Ok(changed)
@@ -546,7 +567,41 @@ impl<DM: WriteNetDir> DirState for GetMicrodescsState<DM> {
             Err(Error::ManagerDropped.into())
         }
     }
-    fn add_from_cache(&mut self, docs: HashMap<DocId, DocumentText>) -> Result<bool> {
+    fn add_from_cache(&mut self, docdir: &str) -> Result<bool> {
+        /*
+        // static data
+        let mut new_mds = Vec::new();
+        for anno in MicrodescReader::new(OUR_MICRODESCRIPTORS, AllowAnnotations::AnnotationsNotAllowed).flatten() {
+            let md = anno.into_microdesc();
+            self.missing.remove(md.digest());
+            new_mds.push(md);
+        }
+        */
+
+        // side-loaded data
+        let microdescriptors_path = format!("{}/microdescriptors.txt", docdir);
+        let microdescriptors = fs::read_to_string(microdescriptors_path)
+            .expect("Failed to read microdescriptors.");
+
+        let mut new_mds = Vec::new();
+        for anno in MicrodescReader::new(microdescriptors.as_str(), AllowAnnotations::AnnotationsNotAllowed).flatten() {
+            let md = anno.into_microdesc();
+            self.missing.remove(md.digest());
+            new_mds.push(md);
+        }
+
+        self.newly_listed.clear();
+        self.register_microdescs(new_mds);
+
+        /*
+        let mut docs = Vec::new();
+        docs.extend(
+            OUR_MICRODESCRIPTORS.iter().map(
+                |StaticMicrodescriptor{digest, contents}|
+                (DocId::Microdesc(*digest), DocumentText::from_string(contents.to_string()))
+            )
+        );
+
         let mut microdescs = Vec::new();
         for (id, text) in docs {
             if let DocId::Microdesc(digest) = id {
@@ -566,8 +621,8 @@ impl<DM: WriteNetDir> DirState for GetMicrodescsState<DM> {
 
         let changed = !microdescs.is_empty();
         self.register_microdescs(microdescs);
-
-        Ok(changed)
+        */
+        Ok(true)
     }
     async fn add_from_download(
         &mut self,

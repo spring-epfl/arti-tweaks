@@ -106,7 +106,7 @@ impl<R: Runtime> TorClient<R> {
     ///
     /// Return a client once there is enough directory material to
     /// connect safely over the Tor network.
-    pub async fn bootstrap(runtime: R, dircfg: DirMgrConfig) -> Result<TorClient<R>> {
+    pub async fn bootstrap(runtime: R, dircfg: DirMgrConfig, docdir: &str) -> Result<TorClient<R>> {
         let chanmgr = Arc::new(tor_chanmgr::ChanMgr::new(runtime.clone()));
         let circmgr = Arc::new(tor_circmgr::CircMgr::new(
             runtime.clone(),
@@ -114,6 +114,7 @@ impl<R: Runtime> TorClient<R> {
         ));
         let dirmgr = tor_dirmgr::DirMgr::bootstrap_from_config(
             dircfg,
+            docdir,
             runtime.clone(),
             Arc::clone(&circmgr),
         )
